@@ -1,0 +1,9 @@
+{
+	"name": "injected",
+	"authors": [
+		"Thayne McCombs"
+	],
+	"description": "Dependency injection framework",
+	"copyright": "Copyright © 2016, Thayne McCombs",
+	"license": "ISC"
+}
