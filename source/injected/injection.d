@@ -1,19 +1,16 @@
 module injected.injection;
 
-import std.meta : staticMap;
+import std.meta : staticMap, Filter;
 
 import injected.resolver : Resolver;
 
 /**
  * Annotation for an injection.
  * It can optionally include a name to use for the lookup.
- *
- * Notes: Using a value with a null name, and using the type itself
- * as the annotation are equivalent for the purposes of the injected library.
  */
-struct Injected(T) {
-    string name = null;
+struct Injected(T, string _name = null) {
     alias Type = T;
+    enum name = _name;
 }
 
 /**
@@ -27,18 +24,19 @@ struct Injectable(T...) {
     alias Injections = T;
 }
 
-template toInjected(Args...) if (Args.length == 1) {
-    import std.meta : Alias;
-    private alias T = Alias!(Args[0]);
+template getInjectables(alias symbol) {
+    private template isInjectable(alias T) {
+        enum isInjectable = is(T: Injectable!(U), U...);
+    }
 
-    static if (is(T: Injected!U, U)) {
-        enum toInjected = T();
-    } else static if (is(T)) {
-        enum toInjected = Injected!T();
-    } else static if (is(typeof(T) : Injected!U, U)) {
-        enum toInjected = T;
+    alias getInjectables = Filter!(isInjectable, __traits(getAttributes, symbol));
+}
+
+template toInjected(T) {
+    static if (is(T: Injected!U, U) || is(T: Injected!(U, n), U, string n)) {
+        alias toInjected = T;
     } else {
-        static assert(0, "Injection must be a type or an instance of Injectable.");
+        alias toInjected = Injected!T;
     }
 }
 
@@ -55,27 +53,16 @@ template extractInjected(Args...) {
 unittest {
     import std.meta : AliasSeq;
 
-    static assert(extractInjected!(int, string) == AliasSeq!(Injected!int(), Injected!string()));
-    static assert(extractInjected!(Injected!float) == AliasSeq!(Injected!float()));
-    static assert(extractInjected!(Injected!int("foo")) == AliasSeq!(Injected!int("foo")));
+    static assert(is(extractInjected!(int, string) == AliasSeq!(Injected!int, Injected!string)));
+    static assert(is(extractInjected!(Injected!float) == AliasSeq!(Injected!float)));
+    static assert(is(extractInjected!(Injected!(int, "foo")) == AliasSeq!(Injected!(int, "foo"))));
 
-    static assert(extractInjected!(Injected!string("name"), int, Injected!(void*)) == AliasSeq!(Injected!string("name"), Injected!int(), Injected!(void*)()));
+    static assert(is(extractInjected!(Injected!(string, "name"), int, Injected!(void*)) == AliasSeq!(Injected!(string, "name"), Injected!int, Injected!(void*))));
 
     static assert(!__traits(compiles, extractInjected!("hi", int)));
 }
 
-template InjectionType(Args...) if (Args.length == 1) {
-    static if (is(typeof(Args[0]) T: Injected!T)) {
-        alias InjectionType = T;
-    } else static if (is(Args[0] T: Injected!T)) {
-        alias InjectionType = T;
-    } else static if (is(Args[0] T)) {
-        alias InjectionType = T;
-    } else {
-        alias InjectionType = typeof(Args[0]);
-    }
-
-}
+alias InjectionType(T) = toInjected!T.Type;
 
 auto injectionSeq(Args...)(Resolver resolver) {
     import std.typecons : Tuple;
@@ -107,10 +94,10 @@ unittest {
 
     assert(injectionSeq!(Injected!string)(container) == tuple("name"));
     assert(injectionSeq!(Injected!int)(container) == tuple(10));
-    assert(injectionSeq!(Injected!int("a"))(container) == tuple(10));
-    assert(injectionSeq!(Injected!int("b"))(container) == tuple(20));
+    assert(injectionSeq!(Injected!(int, "a"))(container) == tuple(10));
+    assert(injectionSeq!(Injected!(int,"b"))(container) == tuple(20));
     assert(injectionSeq!(int, string, float)(container) == tuple(10, "name", 3.14f));
 
-    assert(injectionSeq!(Injected!string, Injected!int("b"), Injected!float())(container) ==
+    assert(injectionSeq!(Injected!string, Injected!(int, "b"), Injected!float)(container) ==
            tuple("name", 20, 3.14f));
 }
