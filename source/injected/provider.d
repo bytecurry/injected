@@ -32,7 +32,7 @@ interface Provider {
 class ValueProvider(T) : Provider {
     T value;
 
-    this(T val) {
+    this(T val) pure {
         value = val;
     }
 
@@ -73,7 +73,7 @@ class SingletonProvider : Provider {
     private Provider _base;
     private void* _instance;
 
-    this(Provider baseProvider) {
+    this(Provider baseProvider) pure nothrow {
         _base = baseProvider;
     }
 
@@ -132,7 +132,7 @@ class ClassProvider(T) : Provider if (is(T == class)) {
         private alias Injections = Parameters!(__traits(getMember, T, "__ctor"));
     }
 
-    this(Resolver resolver) {
+    this(Resolver resolver) pure {
         _resolver = resolver;
     }
 
@@ -243,7 +243,7 @@ class FactoryProvider(alias F) : Provider if (isCallable!F) {
      * which could be either be specified using an `Injectable` annotation, or inferred
      * from the parameter list of the function.
      */
-    this(Resolver resolver) {
+    this(Resolver resolver) pure {
         _resolver = resolver;
     }
 
@@ -311,7 +311,7 @@ class FactoryProvider(F) : Provider if (is(F == function) || is(F == delegate)) 
     /**
      * Parameters: `resolver` is used to resolve arguments, `func` is the factory function to use.
      */
-    this(Resolver resolver, F func) {
+    this(Resolver resolver, F func) pure {
         _resolver = resolver;
         _func = func;
     }
@@ -365,7 +365,7 @@ unittest {
  * If it is a reference type, caast it,
  * otherwise allocate heap memory for it and return a pointer.
  */
-private void* toVoidPtr(T)(T value) {
+private void* toVoidPtr(T)(T value) pure {
     static if (isRefType!T) {
         return cast(void*) value;
     } else {
