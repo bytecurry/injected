@@ -270,6 +270,19 @@ class DerivedContainer : SimpleContainer {
     }
 }
 
+///
+unittest {
+    auto base = makeContainer();
+    base.value!int(6);
+    base.value!string("foo");
+
+    auto derived = base.derivedContainer();
+    derived.value!string("bar");
+
+    assert(derived.resolve!string() == "bar");
+    assert(derived.resolve!int() == 6);
+}
+
 /**
  * Create a derived container from a parent container.
  */
