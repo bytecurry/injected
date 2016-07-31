@@ -3,7 +3,7 @@ module injected.provider;
 import std.traits : ReturnType, Parameters, isCallable;
 
 import injected.injection;
-import injected.resolver : isRefType, Resolver;
+import injected.resolver : Resolver;
 
 /**
  * Interface for a provider for dependency injection.
@@ -12,11 +12,27 @@ import injected.resolver : isRefType, Resolver;
  */
 interface Provider {
     /**
-     * Produce the value. It is returned as a `void*`
-     * so that arbitrary values (not just class objects) can be
-     * produced.
+     * Produce the value.
+     * A pointer to the value is passed to a delegate.
+     *
+     * Notes: The pointer may no longer be valid after `dg` returns, so the value
+     * pointed to should be copied to persist it.
      */
-    void* provide();
+    void withProvided(void delegate(void*) dg);
+
+    /**
+     * Provied the value.
+     * T must be the same type represented by the `TypeInfo`
+     * returned by `providedType`.
+     */
+    final T provide(T)() {
+        assert(typeid(T) == providedType());
+        T result;
+        withProvided(delegate(ptr) {
+                result = *(cast(T*) ptr);
+            });
+        return result;
+    }
 
     /**
      * Return a `TypeInfo` describing the type provided.
@@ -36,12 +52,8 @@ class ValueProvider(T) : Provider {
         value = val;
     }
 
-    void* provide() {
-        static if(isRefType!T) {
-            return cast(void*) value;
-        } else {
-            return &value;
-        }
+    void withProvided(void delegate(void*) dg) {
+        dg(&value);
     }
 
     @property TypeInfo providedType() const {
@@ -49,11 +61,11 @@ class ValueProvider(T) : Provider {
     }
 }
 
+
 unittest {
     Provider provider = new ValueProvider!int(10);
     assert(provider.providedType == typeid(int));
-    assert(*(cast(int*) provider.provide()) == 10);
-
+    assert(provider.provide!int() == 10);
 }
 
 unittest {
@@ -61,7 +73,7 @@ unittest {
     auto c = new C();
     auto provider = new ValueProvider!C(c);
     assert(provider.providedType == typeid(C));
-    assert((cast(C) provider.provide()) is c);
+    assert(provider.provide!C() is c);
 }
 
 /**
@@ -77,17 +89,35 @@ class SingletonProvider : Provider {
         _base = baseProvider;
     }
 
-    void* provide() {
+    void withProvided(void delegate(void*) dg) {
         synchronized (this) {
             if (_instance is null) {
-                _instance = _base.provide();
+                createInstance();
             }
         }
-        return _instance;
+        dg(_instance);
     }
 
     @property TypeInfo providedType() const {
         return _base.providedType();
+    }
+
+    /**
+     * Create an instance using the base provider.
+     *
+     * Since we don't know if the value is allocated on the stack
+     * or the heap, we need to allocate space on the heap and copy it
+     * there.
+     */
+    private void createInstance() {
+        import core.memory : GC;
+        import core.stdc.string : memcpy;
+        auto info = _base.providedType();
+        _base.withProvided((ptr) {
+                _instance = GC.malloc(info.tsize, GC.getAttr(ptr), info);
+                memcpy(_instance, ptr, info.tsize);
+            });
+        info.postblit(_instance);
     }
 }
 
@@ -95,8 +125,8 @@ unittest {
     class BaseProvider : Provider {
         private int counter = 0;
 
-        void* provide() {
-            return new int(counter++);
+        void withProvided(void delegate(void*) dg) {
+            dg(&counter);
         }
 
         @property TypeInfo providedType() const {
@@ -106,11 +136,9 @@ unittest {
 
     auto provider = new SingletonProvider(new BaseProvider);
     assert(provider.providedType == typeid(int));
-    int* first = cast(int*) provider.provide();
-    assert(*first == 0);
-    assert(provider.provide() is first);
-    *first = 10;
-    assert(*(cast(int*) provider.provide()) == 10);
+    int first = provider.provide!int();
+    assert(first == 0);
+    assert(provider.provide!int()== 0);
 }
 
 /**
@@ -136,8 +164,9 @@ class ClassProvider(T) : Provider if (is(T == class)) {
         _resolver = resolver;
     }
 
-    void* provide() {
-        return cast(void*) new T(injectionSeq!(Injections)(_resolver).expand);
+    void withProvided(void delegate(void*) dg) {
+        auto provided = new T(injectionSeq!(Injections)(_resolver).expand);
+        dg(&provided);
     }
 
     @property TypeInfo_Class providedType() const {
@@ -176,7 +205,7 @@ unittest {
     auto provider = new ClassProvider!Test(container);
     assert(provider.providedType == typeid(Test));
 
-    auto test = cast(Test) provider.provide();
+    auto test = provider.provide!Test();
     assert(test);
     assert(test.a is a);
     assert(test.b is b);
@@ -208,9 +237,8 @@ unittest {
     auto provider = new ClassProvider!Test(container);
     assert(provider.providedType == typeid(Test));
 
-    auto test = cast(Test) provider.provide();
+    auto test = provider.provide!Test();
     assert(test);
-    import std.stdio;
     assert(test.a == 5);
     assert(test.b == 10);
     assert(test.c == 3.14f);
@@ -247,9 +275,9 @@ class FactoryProvider(alias F) : Provider if (isCallable!F) {
         _resolver = resolver;
     }
 
-    void* provide() {
+    void withProvided(void delegate(void*) dg) {
         auto value = F(injectionSeq!(Injections)(_resolver).expand);
-        return toVoidPtr(value);
+        dg(&value);
     }
 
     @property TypeInfo providedType() const {
@@ -286,7 +314,7 @@ unittest {
 
     Provider provider = new FactoryProvider!test1(container);
     assert(provider.providedType == typeid(Result));
-    auto result = cast(Result*) provider.provide();
+    auto result = provider.provide!Result();
     assert(result.a is a);
     assert(result.b == 6);
     assert(result.c == "foo");
@@ -294,7 +322,7 @@ unittest {
 
     provider = new FactoryProvider!test2(container);
     assert(provider.providedType == typeid(Result));
-    result = cast(Result*) provider.provide();
+    result = provider.provide!Result();
     assert(result.a is a);
     assert(result.b == 6);
     assert(result.c == "foo");
@@ -316,9 +344,9 @@ class FactoryProvider(F) : Provider if (is(F == function) || is(F == delegate)) 
         _func = func;
     }
 
-    void* provide() {
+    void withProvided(void delegate(void*) dg) {
         auto value = _func(injectionSeq!(Injections)(_resolver).expand);
-        return toVoidPtr(value);
+        dg(&value);
     }
 
     @property TypeInfo providedType() const {
@@ -353,39 +381,9 @@ unittest {
 
     auto provider = new FactoryProvider!(typeof(dg))(container, dg);
     assert(provider.providedType == typeid(Result));
-    auto result = cast(Result*) provider.provide();
+    auto result = provider.provide!Result();
 
     assert(result.a is a);
     assert(result.b is b);
     assert(result.c is c);
-}
-
-/**
- * Convert any type to a `void*`.
- * If it is a reference type, caast it,
- * otherwise allocate heap memory for it and return a pointer.
- */
-private void* toVoidPtr(T)(T value) pure {
-    static if (isRefType!T) {
-        return cast(void*) value;
-    } else {
-        import std.array : uninitializedArray;
-        // for structs we need to allocate the memory before initializing
-        // see https://issues.dlang.org/show_bug.cgi?id=12918
-        auto result = cast(T*) uninitializedArray!(void[])(T.sizeof).ptr;
-        *result = value;
-        return cast(void*) result;
-    }
-}
-
-
-unittest {
-    auto ptr = toVoidPtr!int(15);
-    assert(is(typeof(ptr) == void*));
-    assert(*(cast(int*) ptr) == 15);
-
-    static class C {}
-    auto c = new C;
-    ptr = toVoidPtr(c);
-    assert((cast(C) ptr) is c);
 }

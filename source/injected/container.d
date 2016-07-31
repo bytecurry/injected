@@ -133,20 +133,20 @@ class SimpleContainer : Container {
         }
     }
 
-    void* resolveInstance(TypeInfo info) {
+    void withResolvedPtr(TypeInfo info, void delegate(void*) dg) {
         auto providerGroup = info in providers;
         assert(providerGroup, "Unable to resolve " ~ info.toString());
-        return providerGroup.mainProvider.provide();
+        providerGroup.mainProvider.withProvided(dg);
     }
 
-    void* resolveInstance(TypeInfo info, string name) {
+    void withResolvedPtr(TypeInfo info, string name, void delegate(void*) dg) {
         auto providerGroup = info in providers;
         assert(providerGroup, "Unable to resolve " ~ info.toString());
 
         auto provider = name in providerGroup.namedProviders;
         assert(provider, "Unable to resolve name " ~ name ~ " for type " ~ info.toString());
 
-        return provider.provide();
+        return provider.withProvided(dg);
     }
 
     bool canResolve(TypeInfo info) {
@@ -245,19 +245,19 @@ class DerivedContainer : SimpleContainer {
         return _parent;
     }
 
-    override void* resolveInstance(TypeInfo info) {
+    override void withResolvedPtr(TypeInfo info, void delegate(void*) dg) {
         if (super.canResolve(info)) {
-            return super.resolveInstance(info);
+            super.withResolvedPtr(info, dg);
         } else {
-            return  _parent.resolveInstance(info);
+            _parent.withResolvedPtr(info, dg);
         }
     }
 
-    override void* resolveInstance(TypeInfo info, string name) {
+    override void withResolvedPtr(TypeInfo info, string name, void delegate(void*) dg) {
         if (super.canResolve(info, name)) {
-            return super.resolveInstance(info, name);
+            super.withResolvedPtr(info, name, dg);
         } else {
-            return _parent.resolveInstance(info, name);
+            _parent.withResolvedPtr(info, name, dg);
         }
     }
 
